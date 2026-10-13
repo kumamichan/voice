@@ -1,0 +1,1243 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#faf6f1">
+<title>Dulce Voice</title>
+<!--
+==========================================================
+ Dulce Voice — スタッフの声を届けるアプリ（HTML版）
+
+ ■ 今の状態
+   CONFIG.GAS_URL が空 → デモモード（データはメモリ上。再読み込みでリセット）
+   CONFIG.GAS_URL に GAS のウェブアプリURLを入れる → 本番モード
+
+ ■ GAS側で用意するアクション（POST / JSON {action, payload, token}）
+   staffList / login / badges / home / setMood / submitPulse
+   sendVoice / inbox / sent / voice / setStatus / reply / share
+   stats / soften / staffAdmin / saveStaff / emailLog
+   ※ 返り値は {ok:true, data:...} / {ok:false, error:"..."}
+   ※ 匿名の判定・メール送信・AI要約（Claude API）はGAS側で行う
+==========================================================
+-->
+<style>
+:root{
+  --bg:#faf6f1; --card:#ffffff; --ink:#3b3330; --sub:#8b7f78; --line:#ece3da;
+  --accent:#c4876a; --accent-dark:#a96f54; --accent-soft:#f5e6dc;
+  --green:#5f9273; --green-soft:#e3efe7; --blue:#5f83ab; --blue-soft:#e4ecf5;
+  --amber:#c99230; --amber-soft:#f8eed8; --red:#bf6363; --red-soft:#f6e1e1;
+  --radius:16px; --shadow:0 1px 2px rgba(59,51,48,.05),0 6px 18px rgba(59,51,48,.05);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--bg)}
+body{font-family:-apple-system,BlinkMacSystemFont,"Hiragino Sans","Hiragino Kaku Gothic ProN","Noto Sans JP","Yu Gothic",sans-serif;color:var(--ink);font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea,select{font:inherit;color:inherit}
+#app{max-width:520px;margin:0 auto;min-height:100vh;padding-bottom:88px}
+main{padding:12px 16px 24px}
+
+/* top */
+.topbar{position:sticky;top:0;z-index:10;background:rgba(250,246,241,.92);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line)}
+.brand{font-weight:700;letter-spacing:.04em}
+.brand span{color:var(--accent)}
+.who{font-size:12px;color:var(--sub);display:flex;align-items:center;gap:8px}
+.who button{font-size:12px;color:var(--sub);border:1px solid var(--line);border-radius:999px;padding:2px 10px;background:#fff}
+
+/* nav */
+.nav{position:fixed;bottom:0;left:0;right:0;z-index:10;background:#fff;border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+.nav-in{max-width:520px;margin:0 auto;display:flex}
+.nav button{flex:1;padding:8px 0 10px;font-size:11px;color:var(--sub);display:flex;flex-direction:column;align-items:center;gap:2px;position:relative}
+.nav button .ic{font-size:20px;line-height:1.2}
+.nav button.on{color:var(--accent-dark);font-weight:700}
+.nav .badge{position:absolute;top:4px;left:calc(50% + 6px)}
+.badge{background:var(--red);color:#fff;font-size:10px;font-weight:700;border-radius:999px;min-width:18px;height:18px;padding:0 5px;display:inline-flex;align-items:center;justify-content:center}
+
+/* common */
+h1{font-size:20px;margin:8px 0 4px}
+h2{font-size:15px;margin:22px 0 10px;display:flex;align-items:center;gap:6px}
+.lead{color:var(--sub);font-size:13px}
+.card{background:var(--card);border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+.card.soft{background:var(--accent-soft);box-shadow:none}
+.card.green{background:var(--green-soft);box-shadow:none}
+.muted{color:var(--sub)}
+.small{font-size:12px}
+.row{display:flex;align-items:center;gap:8px}
+.between{justify-content:space-between}
+.wrap{flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:12px;padding:12px 16px;font-weight:700;border:1px solid var(--line);background:#fff;transition:transform .05s}
+.btn:active{transform:scale(.98)}
+.btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn-primary:disabled{opacity:.45}
+.btn-ghost{background:transparent}
+.btn-block{width:100%}
+.btn-sm{padding:6px 12px;font-size:13px;border-radius:10px}
+.link{color:var(--accent-dark);font-weight:700;font-size:13px}
+.pill{display:inline-block;font-size:11px;font-weight:700;border-radius:999px;padding:2px 9px;white-space:nowrap}
+.st-new{background:var(--red-soft);color:var(--red)}
+.st-read{background:var(--blue-soft);color:var(--blue)}
+.st-reviewing{background:var(--amber-soft);color:var(--amber)}
+.st-done{background:var(--green-soft);color:var(--green)}
+.tag{display:inline-block;font-size:11px;color:var(--sub);background:#f3eee8;border-radius:6px;padding:1px 7px;margin-right:4px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
+.empty{text-align:center;color:var(--sub);padding:32px 8px;font-size:14px}
+
+/* login */
+.login{padding:32px 20px}
+.logo{text-align:center;margin:12px 0 28px}
+.logo .mark{font-size:44px}
+.logo .name{font-size:22px;font-weight:800;letter-spacing:.06em}
+.logo .name span{color:var(--accent)}
+.logo p{color:var(--sub);font-size:13px}
+.staff-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.staff-tile{background:#fff;border-radius:14px;padding:12px 6px;text-align:center;box-shadow:var(--shadow);font-weight:700;font-size:14px}
+.staff-tile small{display:block;font-weight:400;color:var(--sub);font-size:11px}
+.store-label{font-size:12px;color:var(--sub);margin:10px 0 6px;font-weight:700}
+.pin-dots{display:flex;justify-content:center;gap:14px;margin:22px 0}
+.pin-dots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--accent);display:block}
+.pin-dots i.on{background:var(--accent)}
+.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:300px;margin:0 auto}
+.keypad button{height:62px;border-radius:50%;width:62px;margin:0 auto;background:#fff;box-shadow:var(--shadow);font-size:22px;font-weight:600}
+.keypad button.blank{visibility:hidden}
+.err{color:var(--red);text-align:center;font-size:13px;min-height:20px}
+.demo-hint{margin-top:28px;font-size:12px;color:var(--sub);background:#fff;border:1px dashed var(--line);border-radius:12px;padding:10px 12px}
+
+/* home */
+.mood-row{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+.mood-row button{background:#fff;border:1px solid var(--line);border-radius:14px;padding:10px 0;display:flex;flex-direction:column;align-items:center;font-size:12px;color:var(--sub)}
+.mood-row button .e{font-size:28px;line-height:1.3}
+.mood-row button.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink);font-weight:700}
+.type-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.type-card{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px 14px;text-align:left;display:flex;flex-direction:column;gap:4px;min-height:118px}
+.type-card .e{font-size:28px}
+.type-card b{font-size:14px;line-height:1.4}
+.type-card span{font-size:11.5px;color:var(--sub);line-height:1.5}
+.change{display:flex;gap:8px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.change:last-child{border-bottom:none}
+.change .ck{color:var(--green);font-weight:800}
+.board{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;scroll-snap-type:x mandatory}
+.board .note{flex:0 0 78%;scroll-snap-align:start;background:#fffaf0;border:1px solid #f1e5cc;border-radius:14px;padding:12px 14px;font-size:13.5px}
+.board .note .hd{font-size:12px;color:var(--sub);margin-bottom:4px}
+
+/* forms */
+.step{background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:16px;margin-bottom:12px}
+.step-h{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+.step-n{font-size:11px;font-weight:800;color:var(--accent-dark);background:var(--accent-soft);border-radius:999px;padding:1px 9px}
+.step-t{font-weight:700;font-size:14.5px}
+.step-s{font-size:12px;color:var(--sub);margin:-4px 0 10px}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 13px;font-size:13.5px;display:inline-flex;align-items:center;gap:5px}
+.chip small{font-size:10.5px;color:var(--sub)}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.chip.on small{color:#fbe9df}
+.chip.block.on{background:#6b6280;border-color:#6b6280}
+.sub-label{font-size:11.5px;color:var(--sub);font-weight:700;margin:12px 0 6px}
+.sub-label:first-child{margin-top:0}
+.seg{display:flex;flex-direction:column;gap:8px}
+.seg button{text-align:left;border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:flex-start;background:#fff}
+.seg button .r{width:18px;height:18px;border-radius:50%;border:2px solid #cfc4ba;flex:0 0 18px;margin-top:2px}
+.seg button.on{border-color:var(--accent);background:#fdf6f2}
+.seg button.on .r{border:5px solid var(--accent)}
+.seg button b{display:block;font-size:14px}
+.seg button span{font-size:12px;color:var(--sub)}
+.q{margin-top:14px}
+.q:first-of-type{margin-top:0}
+.q label{display:block;font-weight:700;font-size:13.5px;margin-bottom:6px}
+textarea,input[type=text],input[type=email],input[type=tel],select{width:100%;border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:#fffdfb;outline:none;font-size:15px}
+textarea{min-height:88px;resize:vertical;line-height:1.6}
+textarea:focus,input:focus,select:focus{border-color:var(--accent);background:#fff}
+.starters{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.starters button{font-size:11.5px;color:var(--accent-dark);background:var(--accent-soft);border-radius:8px;padding:3px 8px}
+.feel{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.feel button{border:1px solid var(--line);border-radius:12px;padding:8px 0;background:#fff;font-size:12px;display:flex;flex-direction:column;align-items:center}
+.feel button .e{font-size:24px}
+.feel button.on{border-color:var(--accent);background:var(--accent-soft);font-weight:700}
+.check{display:flex;gap:10px;align-items:flex-start;font-size:13.5px;padding:4px 0}
+.check input{width:20px;height:20px;accent-color:var(--accent);margin-top:2px;flex:0 0 20px}
+.notice{font-size:12px;color:var(--sub);background:#f6f1eb;border-radius:10px;padding:8px 10px;margin-top:10px}
+.actions{display:flex;gap:10px;margin-top:6px}
+.actions .btn{flex:1}
+
+/* list */
+.tabs{display:flex;gap:6px;margin:6px 0 12px;background:#efe8e1;border-radius:12px;padding:4px}
+.tabs button{flex:1;padding:7px 0;border-radius:9px;font-size:13px;color:var(--sub);font-weight:700}
+.tabs button.on{background:#fff;color:var(--ink);box-shadow:var(--shadow)}
+.item{display:flex;gap:12px;background:#fff;border-radius:var(--radius);box-shadow:var(--shadow);padding:14px;margin-bottom:10px;text-align:left;width:100%}
+.item-ic{font-size:24px;line-height:1.2}
+.item-main{flex:1;min-width:0}
+.item-top{font-size:13px;font-weight:700;margin-bottom:2px}
+.item-sum{font-size:13.5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.item-meta{font-size:11.5px;color:var(--sub);margin-top:4px}
+.item-side{display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+.progress{display:flex;gap:4px;margin-top:8px}
+.progress i{flex:1;height:4px;border-radius:2px;background:#ece3da}
+.progress i.on{background:var(--green)}
+.progress-l{display:flex;justify-content:space-between;font-size:10px;color:var(--sub);margin-top:2px}
+
+/* detail */
+.back{font-size:13px;color:var(--sub);margin:4px 0 6px;display:inline-flex;gap:4px}
+.meta{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:13px}
+.meta dt{color:var(--sub)}
+.ai{background:linear-gradient(135deg,#fbf3ee,#f3f0fa);border-radius:14px;padding:12px 14px;font-size:13.5px;margin-bottom:12px}
+.ai .h{font-size:11px;font-weight:800;color:#8a6fb0;margin-bottom:4px;letter-spacing:.04em}
+.body-sec{margin-top:12px}
+.body-sec .h{font-size:11.5px;color:var(--sub);font-weight:700;margin-bottom:2px}
+.body-sec p{white-space:pre-wrap;font-size:14.5px}
+.thread{margin-top:6px}
+.msg{margin:10px 0;display:flex;flex-direction:column}
+.msg .who{font-size:11px;color:var(--sub);margin-bottom:2px}
+.msg .bub{background:#f3eee8;border-radius:14px 14px 14px 4px;padding:9px 12px;font-size:14px;white-space:pre-wrap;max-width:88%;align-self:flex-start}
+.msg.mine{align-items:flex-end}
+.msg.mine .bub{background:var(--accent-soft);border-radius:14px 14px 4px 14px;align-self:flex-end}
+.sys{font-size:11.5px;color:var(--sub);text-align:center;margin:8px 0}
+.status-btns{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.status-btns button{border:1px solid var(--line);border-radius:10px;padding:8px 0;font-size:12.5px;font-weight:700;background:#fff}
+.status-btns button.on{background:var(--green);border-color:var(--green);color:#fff}
+
+/* stats */
+.kpi{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.kpi .card{margin:0}
+.kpi .v{font-size:26px;font-weight:800}
+.kpi .v small{font-size:13px;color:var(--sub);font-weight:600}
+.kpi .l{font-size:12px;color:var(--sub)}
+.up{color:var(--green);font-size:12px;font-weight:700}
+.down{color:var(--red);font-size:12px;font-weight:700}
+.barrow{margin:10px 0}
+.barrow .lb{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:4px}
+.bar{height:10px;border-radius:5px;background:#efe8e1;overflow:hidden;display:flex}
+.bar i{display:block;height:100%}
+.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:11.5px;color:var(--sub);margin-top:6px}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:4px;vertical-align:-1px}
+.suppress{font-size:12px;color:var(--sub);background:#f6f1eb;border-radius:8px;padding:6px 8px}
+
+/* table */
+.tbl{width:100%;border-collapse:collapse;font-size:13px}
+.tbl td{padding:8px 4px;border-bottom:1px solid var(--line)}
+.tbl tr:last-child td{border-bottom:none}
+
+/* modal & toast */
+.overlay{position:fixed;inset:0;background:rgba(40,32,28,.42);z-index:50;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--bg);width:100%;max-width:520px;max-height:90vh;overflow:auto;border-radius:20px 20px 0 0;padding:18px 16px calc(20px + env(safe-area-inset-bottom))}
+.sheet h3{font-size:16px;margin-bottom:8px}
+.scale{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin:6px 0 2px}
+.scale button{border:1px solid var(--line);border-radius:10px;padding:8px 0;background:#fff;font-weight:700}
+.scale button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.scale-l{display:flex;justify-content:space-between;font-size:10.5px;color:var(--sub)}
+.mail{background:#fff;border:1px solid var(--line);border-radius:12px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;white-space:pre-wrap;line-height:1.6}
+.cmp{display:grid;gap:8px}
+.cmp .b{background:#fff;border-radius:12px;padding:10px 12px;font-size:13.5px;white-space:pre-wrap}
+.cmp .b.after{border:2px solid var(--accent)}
+#toast{position:fixed;left:50%;bottom:100px;transform:translateX(-50%) translateY(20px);background:#3b3330;color:#fff;padding:10px 16px;border-radius:12px;font-size:13.5px;opacity:0;transition:.25s;z-index:60;pointer-events:none;max-width:90%}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.loading{text-align:center;color:var(--sub);padding:40px 0}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="modal"></div>
+<div id="toast"></div>
+
+<script>
+/* =========================================================
+   設定
+   ========================================================= */
+const CONFIG = {
+  GAS_URL: '',            // ← GASのウェブアプリURL。空ならデモモード
+  SALON_NAME: 'Dulce',
+  REPLY_TARGET_DAYS: 3,   // 返事の目安（日）
+  MIN_N: 3                // これ未満の人数の集計は表示しない（個人特定防止）
+};
+
+/* =========================================================
+   マスタ
+   ========================================================= */
+const STORES = { all:'全店', oro:'oro', plata:'plata', mem:'mem' };
+const ROLES  = { owner:'オーナー', manager:'店長', staff:'スタッフ' };
+const TYPES = {
+  thanks:  { icon:'💐', label:'ありがとう',       desc:'感謝やうれしかったことを伝える' },
+  idea:    { icon:'💡', label:'アイデア・改善の提案', desc:'もっと良くなるヒントを届ける' },
+  concern: { icon:'💭', label:'モヤモヤ・相談',     desc:'言いにくいことも、ここなら' },
+  private: { icon:'🔒', label:'プライベートのこと',  desc:'仕事以外の事情や相談' }
+};
+const CATEGORIES = ['仕事の進め方','人間関係','待遇・シフト','お客様のこと','設備・備品','教育・技術','その他'];
+const FEELINGS = [
+  {k:'anxious',e:'😟',l:'不安'},{k:'trouble',e:'😣',l:'困った'},{k:'sad',e:'😢',l:'悲しい'},
+  {k:'frustrated',e:'😤',l:'もどかしい'},{k:'tired',e:'😮‍💨',l:'疲れた'},{k:'hopeful',e:'🙂',l:'前向き'}
+];
+const MOODS = [
+  {k:'sunny',e:'☀️',l:'晴れ',c:'#f0c46a'},{k:'cloudy',e:'⛅',l:'くもり',c:'#b8c3cc'},
+  {k:'rain',e:'🌧',l:'雨',c:'#7d9cc0'},{k:'storm',e:'⛈',l:'嵐',c:'#6b6280'}
+];
+const STAMPS = ['🙏 ありがとう','✨ さすが！','💪 助かった！','🌸 うれしかった'];
+const URGENCY = { anytime:'いつでも', week:'今週中に', soon:'早めに話したい' };
+const ANON = {
+  named:     { l:'名前を出す',                 d:'受け取った人・共有された人に名前が表示されます' },
+  recipient: { l:'受け取る人にだけ名前を伝える', d:'宛先の人だけが名前を見られます。共有先には匿名で表示' },
+  anon:      { l:'匿名で送る',                 d:'誰にも名前は表示されません' }
+};
+const STATUS = { new:'未読', read:'受け取りました', reviewing:'検討中', done:'対応しました' };
+const PULSE_Q = [
+  'ミスや失敗を話しても、責められないと感じる',
+  '自分の意見を言っても大丈夫だと感じる',
+  '困ったときに頼れる人がいる'
+];
+
+/* =========================================================
+   ユーティリティ
+   ========================================================= */
+const DAY = 86400000;
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const clip = (s,n) => { s = String(s||''); return s.length > n ? s.slice(0,n) + '…' : s; };
+const uid = () => Math.random().toString(36).slice(2,10);
+function dk(ts){ const d = new Date(ts); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+const mkey = ts => dk(ts).slice(0,7);
+function prevMonthKey(){ const d = new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return mkey(d.getTime()); }
+function ago(ts){
+  const m = Math.floor((Date.now()-ts)/60000);
+  if (m < 1) return 'たった今';
+  if (m < 60) return m + '分前';
+  const h = Math.floor(m/60); if (h < 24) return h + '時間前';
+  const d = Math.floor(h/24); if (d < 7) return d + '日前';
+  const t = new Date(ts); return (t.getMonth()+1) + '/' + t.getDate();
+}
+function toast(msg){ const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(t._h); t._h = setTimeout(()=>t.classList.remove('show'), 2400); }
+function openModal(html){ document.getElementById('modal').innerHTML = `<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="sheet">${html}</div></div>`; }
+function closeModal(){ document.getElementById('modal').innerHTML = ''; }
+const feelingOf = k => FEELINGS.find(f=>f.k===k);
+const moodOf = k => MOODS.find(m=>m.k===k);
+
+/* =========================================================
+   API（本番：GAS / デモ：Demo）
+   ========================================================= */
+async function api(action, payload = {}){
+  if (CONFIG.GAS_URL){
+    const res = await fetch(CONFIG.GAS_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ action, payload, token: S.token })
+    });
+    const j = await res.json();
+    if (!j.ok) throw new Error(j.error || 'エラーが発生しました');
+    return j.data;
+  }
+  if (!Demo[action]) throw new Error('未対応の操作です: ' + action);
+  return JSON.parse(JSON.stringify(Demo[action](payload)));
+}
+
+/* =========================================================
+   デモ用データ（本番ではスプレッドシートに保存）
+   ========================================================= */
+let seed = 11;
+const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+const NOW = Date.now();
+
+const DB = {
+  staff: [
+    {id:'s1', name:'チェスト', role:'owner',   store:'all',   pin:'0000', email:'owner@example.com'},
+    {id:'s2', name:'佐藤',     role:'manager', store:'oro',   pin:'1111', email:'oro@example.com'},
+    {id:'s3', name:'鈴木',     role:'manager', store:'plata', pin:'2222', email:'plata@example.com'},
+    {id:'s4', name:'高橋',     role:'manager', store:'mem',   pin:'3333', email:'mem@example.com'},
+    {id:'s5', name:'田中',     role:'staff',   store:'oro',   pin:'1234', email:''},
+    {id:'s9', name:'中村',     role:'staff',   store:'oro',   pin:'5678', email:''},
+    {id:'s6', name:'伊藤',     role:'staff',   store:'plata', pin:'2345', email:''},
+    {id:'s8', name:'山本',     role:'staff',   store:'plata', pin:'4567', email:''},
+    {id:'s7', name:'渡辺',     role:'staff',   store:'mem',   pin:'3456', email:''},
+    {id:'s10',name:'小林',     role:'staff',   store:'mem',   pin:'6789', email:''}
+  ],
+  voices: [], moods: [], pulses: [], emails: []
+};
+
+(function seedData(){
+  const mk = (o) => Object.assign({
+    id:uid(), categories:[], recipients:[], all:false, blocked:[], shared:[], anon:'named',
+    fact:'', feeling:'', request:'', effect:'', body:'', stamp:'', urgency:'anytime',
+    emailOk:true, publicBoard:false, status:'new', thread:[], readBy:[], changeNote:'', doneAt:null, respondedAt:null
+  }, o);
+  DB.voices.push(mk({
+    type:'concern', from:'s6', recipients:['s1'], anon:'recipient', categories:['仕事の進め方','人間関係'],
+    fact:'閉店後の片付けの分担が決まっていなくて、最近は同じ人ばかりが残っている気がします。',
+    feeling:'trouble', request:'当番表をつくってもらえると助かります。', urgency:'week',
+    createdAt: NOW - DAY*0.6, readBy:['s6']
+  }));
+  DB.voices.push(mk({
+    type:'idea', from:'s5', recipients:['s1','s2'], anon:'named', categories:['設備・備品'],
+    fact:'シャンプー台横のタオルが、ピークの時間に足りなくなります。',
+    request:'補充のタイミングを午前・午後の2回に決めたいです。', effect:'お客様をお待たせする時間が減ると思います。',
+    status:'done', createdAt: NOW - DAY*9, respondedAt: NOW - DAY*8.5, doneAt: NOW - DAY*6,
+    changeNote:'oro：タオル補充を1日2回（11時・15時）に変更しました',
+    thread:[
+      {kind:'status', by:'s2', status:'read', at: NOW - DAY*8.8},
+      {kind:'reply', from:'s2', text:'ありがとう！今週から試してみましょう。', at: NOW - DAY*8.5},
+      {kind:'status', by:'s1', status:'done', at: NOW - DAY*6}
+    ], readBy:['s1','s2','s5']
+  }));
+  DB.voices.push(mk({
+    type:'idea', from:'s8', all:true, anon:'anon', categories:['待遇・シフト'],
+    fact:'忙しい日は休憩が取れないまま夕方になることがあります。',
+    request:'14時台に交代で15分ずつ休めるようにしたいです。',
+    status:'done', createdAt: NOW - DAY*14, respondedAt: NOW - DAY*13, doneAt: NOW - DAY*4,
+    changeNote:'休憩の取り方を見直し、14時台に交代で休めるようにしました',
+    thread:[
+      {kind:'reply', from:'s1', text:'大事な提案をありがとう。店長会議で話し合いました。来週から試します。', at: NOW - DAY*13},
+      {kind:'status', by:'s1', status:'done', at: NOW - DAY*4}
+    ], readBy:['s1','s8']
+  }));
+  DB.voices.push(mk({
+    type:'private', from:'s9', recipients:['s1'], anon:'recipient',
+    fact:'来月から家族の事情で、土曜の夕方以降のシフトに入りにくくなりそうです。',
+    feeling:'anxious', request:'一度、相談の時間をいただけますか。', urgency:'soon', emailOk:false,
+    status:'reviewing', createdAt: NOW - DAY*3, respondedAt: NOW - DAY*2.8,
+    thread:[
+      {kind:'status', by:'s1', status:'read', at: NOW - DAY*2.9},
+      {kind:'reply', from:'s1', text:'話してくれてありがとう。木曜の営業後に15分ほど時間をとりましょう。', at: NOW - DAY*2.8},
+      {kind:'status', by:'s1', status:'reviewing', at: NOW - DAY*2.8}
+    ], readBy:['s1','s9']
+  }));
+  DB.voices.push(mk({
+    type:'thanks', from:'s7', recipients:['s4'], stamp:'💪 助かった！', publicBoard:true,
+    body:'昨日の忙しい時間、さりげなくカラーのフォローに入ってくれて本当に助かりました！',
+    createdAt: NOW - DAY*1.2, readBy:['s7','s4']
+  }));
+  DB.voices.push(mk({
+    type:'thanks', from:'s3', recipients:['s6'], stamp:'✨ さすが！', publicBoard:true,
+    body:'新規のお客様へのカウンセリング、とても丁寧で見習いたいと思いました。',
+    createdAt: NOW - DAY*2, readBy:['s3']
+  }));
+
+  const ids = DB.staff.filter(s=>s.role!=='owner').map(s=>s.id);
+  for (let d = 1; d <= 13; d++){
+    ids.forEach(id=>{
+      if (rnd() < 0.82){
+        const r = rnd();
+        const mood = r < .45 ? 'sunny' : r < .78 ? 'cloudy' : r < .95 ? 'rain' : 'storm';
+        DB.moods.push({ staffId:id, day: dk(NOW - DAY*d), mood });
+      }
+    });
+  }
+  const sc = () => Math.min(5, Math.max(1, Math.round(3 + rnd()*2.2 - .3)));
+  ids.forEach(id => DB.pulses.push({ staffId:id, month: prevMonthKey(), answers:[sc(),sc(),sc()] }));
+  ['s2','s3','s5','s6','s8','s7'].forEach(id => DB.pulses.push({ staffId:id, month: mkey(NOW), answers:[sc(),sc()+0,sc()] }));
+})();
+
+/* ---------- デモサーバー（本番はGASが同じ役割をする） ---------- */
+const me = () => DB.staff.find(s => s.id === S.user.id);
+const staffById = id => DB.staff.find(s => s.id === id);
+const nameOf = id => (staffById(id) || {}).name || '（不明）';
+const storeOf = id => (staffById(id) || {}).store || 'all';
+const pubStaff = s => ({ id:s.id, name:s.name, role:s.role, store:s.store });
+
+function visible(v,u){
+  if (v.from === u.id) return true;
+  if ((v.blocked||[]).includes(u.id)) return false;
+  return v.recipients.includes(u.id) || (v.all) || (v.shared||[]).includes(u.id);
+}
+function canManage(v,u){
+  if (v.from === u.id) return false;
+  return v.recipients.includes(u.id) || (v.all && u.role === 'owner');
+}
+function revealsSender(v,u){
+  if (v.from === u.id) return true;
+  if (v.anon === 'named') return true;
+  if (v.anon === 'recipient') return v.recipients.includes(u.id);
+  return false;
+}
+function senderLabel(v,u){
+  if (v.from === u.id) return 'あなた';
+  if (v.anon === 'named') return nameOf(v.from) + 'さん';
+  if (v.anon === 'recipient' && v.recipients.includes(u.id)) return nameOf(v.from) + 'さん（あなたにだけ公開）';
+  return '匿名';
+}
+function storeLabelFor(v,u){
+  if (!revealsSender(v,u) && v.anon === 'anon') return '—';
+  const st = storeOf(v.from); return st === 'all' ? 'オーナー' : STORES[st];
+}
+function touch(v,u){ v.readBy = [u.id]; }
+
+function makeSummary(v){
+  const st = storeOf(v.from);
+  const who = v.anon === 'anon' ? 'スタッフ' : (st === 'all' ? 'オーナー' : `${STORES[st]}店のスタッフ`);
+  if (v.type === 'thanks') return `${who}から、${v.recipients.map(nameOf).join('・')}さんへの感謝のメッセージです。「${clip(v.body,40)}」`;
+  const cat = v.categories.length ? `「${v.categories.join('・')}」についての` : '';
+  let s = `${who}から${cat}${TYPES[v.type].label}が届きました。`;
+  if (v.fact) s += `内容：${clip(v.fact,60)}`;
+  if (v.request) s += ` 希望：${clip(v.request,40)}`;
+  return s;
+}
+function tipsFor(v){
+  const t = ['まずは48時間以内に「受け取りました」と返すと安心してもらえます'];
+  if (v.categories.includes('人間関係')) t.push('個人を責める話にせず、仕組みの問題として扱うと角が立ちにくいです');
+  if (v.urgency === 'soon') t.push('早めに話したいという希望があります。短くてもいいので今日か明日に話す時間をつくりましょう');
+  if (v.type === 'idea') t.push('採用しない場合も、理由を添えて返すと次の提案につながります');
+  if (v.anon === 'anon') t.push('匿名の声です。送った人を探さず、内容に向き合いましょう');
+  if (v.type === 'private') t.push('プライベートな内容です。ほかの人に伝える前に、必ず本人の了承をとりましょう');
+  return t;
+}
+function weeklyMoodLine(){
+  const days = new Set(); for (let i=0;i<7;i++) days.add(dk(NOW - DAY*i));
+  const prev = new Set(); for (let i=7;i<14;i++) prev.add(dk(NOW - DAY*i));
+  const calc = set => { const m = DB.moods.filter(x=>set.has(x.day)); const n = m.length||1; const o={}; MOODS.forEach(k=>o[k.k]=Math.round(m.filter(x=>x.mood===k.k).length/n*100)); return o; };
+  const a = calc(days), b = calc(prev);
+  const diff = (a.rain + a.storm) - (b.rain + b.storm);
+  return `今週のサロンの気分：☀️${a.sunny}% ⛅${a.cloudy}% 🌧${a.rain}% ⛈${a.storm}%（先週より🌧⛈が${diff>=0?'+':''}${diff}%）`;
+}
+function pushEmail(to, subject, body){
+  if (!to.email) return;
+  DB.emails.unshift({ id:uid(), to: to.name + ' <' + to.email + '>', subject, body, at: Date.now() });
+}
+function emailNewVoice(v, to){
+  const showBody = v.type !== 'private' && v.emailOk;
+  const subj = v.type === 'thanks'
+    ? `【${CONFIG.SALON_NAME} Voice】ありがとうが届きました💐`
+    : v.type === 'private'
+      ? `【${CONFIG.SALON_NAME} Voice】プライベートの相談が届きました`
+      : `【${CONFIG.SALON_NAME} Voice】新しい声が届きました（急ぎ度：${URGENCY[v.urgency]}）`;
+  let b = `${to.name}さん\n\n${senderLabel(v,to)}から${TYPES[v.type].label}が届きました。\n\n`;
+  if (showBody){
+    b += `■ 要約（AI）\n${v.summary}\n\n`;
+    if (v.categories.length) b += `■ 分類　：${v.categories.join(' ／ ')}\n`;
+    b += `■ 店舗　：${storeLabelFor(v,to)}\n`;
+    if (v.feeling) b += `■ 気持ち：${feelingOf(v.feeling).e} ${feelingOf(v.feeling).l}\n`;
+    b += `■ 送信者：${senderLabel(v,to)}\n`;
+    if (v.type !== 'thanks') b += `■ 急ぎ度：${URGENCY[v.urgency]}\n\n■ 対応のヒント（AI）\n` + tipsFor(v).map(x=>'・'+x).join('\n') + '\n';
+  } else {
+    b += `本人の希望により、内容はメールに記載していません。\nアプリで確認してください。\n`;
+    if (v.type !== 'thanks') b += `\n■ 急ぎ度：${URGENCY[v.urgency]}\n`;
+  }
+  b += `\n▶ アプリで全文を見る・返信する\n（アプリのURL）\n`;
+  if (to.role === 'owner') b += `\n────────────\n${weeklyMoodLine()}\n`;
+  pushEmail(to, subj, b);
+}
+
+const Demo = {
+  staffList(){ return DB.staff.map(pubStaff); },
+  login({ staffId, pin }){
+    const s = staffById(staffId);
+    if (!s || s.pin !== pin) throw new Error('PINが違います');
+    return { user: pubStaff(s), token: 'demo-' + s.id };
+  },
+  badges(){
+    const u = me(); let inbox = 0, sent = 0;
+    DB.voices.forEach(v => {
+      if (!visible(v,u) || v.readBy.includes(u.id)) return;
+      v.from === u.id ? sent++ : inbox++;
+    });
+    return { inbox, sent };
+  },
+  home(){
+    const u = me(), today = dk(Date.now());
+    const m = DB.moods.find(x => x.staffId === u.id && x.day === today);
+    const pulseDone = u.role === 'owner' || DB.pulses.some(p => p.staffId === u.id && p.month === mkey(Date.now()));
+    const done = DB.voices.filter(v => v.status === 'done' && v.changeNote).sort((a,b)=>b.doneAt-a.doneAt);
+    const board = DB.voices.filter(v => v.type === 'thanks' && v.publicBoard).sort((a,b)=>b.createdAt-a.createdAt).slice(0,8)
+      .map(v => ({ from: v.anon === 'anon' ? 'だれか' : nameOf(v.from), to: v.recipients.map(nameOf).join('・'), stamp: v.stamp, body: v.body, at: v.createdAt }));
+    const openCount = DB.voices.filter(v => canManage(v,u) && v.status !== 'done' && v.type !== 'thanks').length;
+    return {
+      mood: m ? m.mood : null, pulseDone,
+      changes: done.slice(0,5).map(v => ({ text: v.changeNote, at: v.doneAt })),
+      changesThisMonth: done.filter(v => mkey(v.doneAt) === mkey(Date.now())).length,
+      board, openCount
+    };
+  },
+  setMood({ mood }){
+    const u = me(), day = dk(Date.now());
+    DB.moods = DB.moods.filter(x => !(x.staffId === u.id && x.day === day));
+    DB.moods.push({ staffId:u.id, day, mood }); return true;
+  },
+  submitPulse({ answers }){
+    const u = me(), month = mkey(Date.now());
+    DB.pulses = DB.pulses.filter(p => !(p.staffId === u.id && p.month === month));
+    DB.pulses.push({ staffId:u.id, month, answers }); return true;
+  },
+  sendVoice(c){
+    const u = me();
+    const v = {
+      id: uid(), type: c.type, from: u.id, recipients: c.recipients, all: !!c.all, blocked: c.blocked || [], shared: [],
+      anon: c.anon, categories: c.categories || [], fact: c.fact||'', feeling: c.feeling||'', request: c.request||'', effect: c.effect||'',
+      body: c.body||'', stamp: c.stamp||'', urgency: c.urgency||'anytime',
+      emailOk: c.type === 'private' ? false : !!c.emailOk, publicBoard: c.type === 'thanks' && !!c.publicBoard,
+      status: 'new', thread: [], readBy: [u.id], changeNote:'', doneAt:null, respondedAt:null, createdAt: Date.now()
+    };
+    v.summary = makeSummary(v);   // 本番：GASからClaude APIで要約
+    DB.voices.push(v);
+    const targets = new Set(v.recipients);
+    if (v.all) DB.staff.filter(s => s.role === 'owner').forEach(s => targets.add(s.id));
+    targets.forEach(id => { if (id !== u.id && !v.blocked.includes(id)) emailNewVoice(v, staffById(id)); });
+    return { id: v.id };
+  },
+  inbox(){
+    const u = me();
+    return DB.voices.filter(v => visible(v,u) && v.from !== u.id).sort((a,b)=>b.createdAt-a.createdAt).map(v => vm(v,u));
+  },
+  sent(){
+    const u = me();
+    return DB.voices.filter(v => v.from === u.id).sort((a,b)=>b.createdAt-a.createdAt).map(v => vm(v,u));
+  },
+  voice({ id }){
+    const u = me(), v = DB.voices.find(x => x.id === id);
+    if (!v || !visible(v,u)) throw new Error('この声は表示できません');
+    if (canManage(v,u) && v.status === 'new'){
+      v.status = 'read'; v.thread.push({ kind:'status', by:u.id, status:'read', at:Date.now() }); touch(v,u);
+    }
+    if (!v.readBy.includes(u.id)) v.readBy.push(u.id);
+    return vm(v,u,true);
+  },
+  setStatus({ id, status, changeNote }){
+    const u = me(), v = DB.voices.find(x => x.id === id);
+    if (!canManage(v,u)) throw new Error('権限がありません');
+    v.status = status;
+    v.thread.push({ kind:'status', by:u.id, status, at:Date.now() });
+    if (status === 'done'){ v.doneAt = Date.now(); v.changeNote = changeNote || ''; }
+    if ((status === 'reviewing' || status === 'done') && !v.respondedAt) v.respondedAt = Date.now();
+    touch(v,u); return vm(v,u,true);
+  },
+  reply({ id, text }){
+    const u = me(), v = DB.voices.find(x => x.id === id);
+    if (!visible(v,u)) throw new Error('権限がありません');
+    v.thread.push({ kind:'reply', from:u.id, text, at:Date.now() });
+    if (u.id !== v.from && !v.respondedAt) v.respondedAt = Date.now();
+    touch(v,u); return vm(v,u,true);
+  },
+  share({ id, ids, note }){
+    const u = me(), v = DB.voices.find(x => x.id === id);
+    if (u.role !== 'owner' || !visible(v,u)) throw new Error('共有できるのはオーナーだけです');
+    const add = ids.filter(x => !(v.blocked||[]).includes(x) && !v.shared.includes(x));
+    v.shared.push(...add);
+    v.thread.push({ kind:'share', by:u.id, to:add, note: note||'', at:Date.now() });
+    touch(v,u);
+    add.forEach(sid => {
+      const to = staffById(sid);
+      const showBody = v.type !== 'private' && v.emailOk;
+      let b = `${to.name}さん\n\n${u.name}さんから「この声も一緒に聞いてほしい」と共有がありました。\n`;
+      if (note) b += `\n■ ${u.name}さんからのひとこと\n${note}\n`;
+      b += showBody ? `\n■ 要約（AI）\n${v.summary}\n■ 送信者：${senderLabel(v,to)}\n` : `\n内容はアプリで確認してください。\n`;
+      b += `\n▶ アプリで確認する\n（アプリのURL）\n`;
+      pushEmail(to, `【${CONFIG.SALON_NAME} Voice】${u.name}さんから共有された声があります`, b);
+    });
+    return vm(v,u,true);
+  },
+  stats(){
+    const u = me();
+    const stores = u.role === 'owner' ? ['oro','plata','mem'] : [u.store];
+    const inScope = id => stores.includes(storeOf(id));
+    const MIN = CONFIG.MIN_N;
+    const avgP = list => list.length ? list.reduce((a,p)=>a + p.answers.reduce((x,y)=>x+y,0)/3, 0) / list.length : null;
+    const curM = mkey(Date.now()), prevM = prevMonthKey();
+    const cur = DB.pulses.filter(p => p.month === curM && inScope(p.staffId));
+    const prev = DB.pulses.filter(p => p.month === prevM && inScope(p.staffId));
+    const pulse = {
+      n: cur.length, score: cur.length >= MIN ? avgP(cur) : null, prev: prev.length >= MIN ? avgP(prev) : null,
+      items: PULSE_Q.map((q,i) => ({ q, v: cur.length >= MIN ? cur.reduce((a,p)=>a+p.answers[i],0)/cur.length : null })),
+      byStore: stores.map(st => { const l = cur.filter(p => storeOf(p.staffId) === st); return { store: st, n: l.length, v: l.length >= MIN ? avgP(l) : null }; })
+    };
+    const week = new Set(); for (let i=0;i<7;i++) week.add(dk(NOW - DAY*i)); week.add(dk(Date.now()));
+    const moodBy = stores.map(st => {
+      const l = DB.moods.filter(m => week.has(m.day) && storeOf(m.staffId) === st);
+      const n = new Set(l.map(m=>m.staffId)).size;
+      const dist = {}; MOODS.forEach(k => dist[k.k] = l.length ? l.filter(m=>m.mood===k.k).length / l.length * 100 : 0);
+      return { store: st, n, dist: n >= MIN ? dist : null };
+    });
+    const monthV = DB.voices.filter(v => mkey(v.createdAt) === curM && (inScope(v.from) || u.role === 'owner'));
+    const counts = {}; Object.keys(TYPES).forEach(t => counts[t] = monthV.filter(v=>v.type===t).length);
+    const cats = {}; DB.voices.filter(v => v.type==='idea'||v.type==='concern').filter(v => u.role==='owner' || inScope(v.from))
+      .forEach(v => v.categories.forEach(c => cats[c] = (cats[c]||0) + 1));
+    const handled = DB.voices.filter(v => v.type !== 'thanks' && (u.role==='owner' || inScope(v.from)));
+    const responded = handled.filter(v => v.respondedAt);
+    const avgDays = responded.length ? responded.reduce((a,v)=>a+(v.respondedAt-v.createdAt)/DAY,0)/responded.length : null;
+    return {
+      scope: u.role === 'owner' ? '全店' : STORES[u.store] + '店',
+      pulse, moodBy, counts, cats: Object.entries(cats).sort((a,b)=>b[1]-a[1]),
+      avgDays, responseRate: handled.length ? responded.length / handled.length * 100 : null, handled: handled.length
+    };
+  },
+  soften({ fact, request }){
+    // 本番：GASからClaude APIに「相手を責めない、事実と気持ちとお願いの形に」と依頼して言い換える
+    const rules = [
+      [/いつも/g,'最近'], [/毎回/g,'何度か'], [/絶対に?/g,''], [/ありえない|ありえません/g,'少し困っています'],
+      [/ムカつく|むかつく|イライラする/g,'もどかしく感じています'], [/なんで|何で/g,'どうして'], [/ちゃんと/g,''],
+      [/してくれない/g,'していない'], [/やめてほしい|やめて欲しい/g,'見直してもらえるとうれしいです'],
+      [/最悪/g,'残念'], [/意味が?わからない/g,'理由を知りたいです'], [/おかしい/g,'気になっています'], [/ずるい/g,'不公平に感じます']
+    ];
+    const f = s => rules.reduce((t,[a,b]) => t.replace(a,b), s || '').replace(/\s{2,}/g,' ');
+    return { fact: f(fact), request: f(request) };
+  },
+  staffAdmin(){ if (me().role !== 'owner') throw new Error('権限がありません'); return DB.staff; },
+  saveStaff(s){
+    if (me().role !== 'owner') throw new Error('権限がありません');
+    if (!/^\d{4}$/.test(s.pin)) throw new Error('PINは4桁の数字にしてください');
+    if (DB.staff.some(x => x.pin === s.pin && x.id !== s.id)) throw new Error('そのPINはほかの人が使っています');
+    if (s.id){ Object.assign(DB.staff.find(x=>x.id===s.id), s); }
+    else { s.id = 's' + uid(); DB.staff.push(s); }
+    return true;
+  },
+  emailLog(){ if (me().role !== 'owner') throw new Error('権限がありません'); return DB.emails; }
+};
+
+function vm(v,u,full){
+  const threadVm = t => {
+    const byName = id => id === u.id ? 'あなた' : nameOf(id) + 'さん';
+    if (t.kind === 'reply') return { kind:'reply', who: t.from === v.from ? senderLabel(v,u) : byName(t.from), text:t.text, at:t.at, mine: t.from === u.id };
+    if (t.kind === 'status') return { kind:'sys', text:`${byName(t.by)}が「${STATUS[t.status]}」にしました`, at:t.at };
+    if (t.kind === 'share') return { kind:'sys', text:`${byName(t.by)}が ${t.to.map(nameOf).join('・')}さん にも共有しました`, at:t.at };
+    return { kind:'sys', text:'', at:t.at };
+  };
+  const canShare = u.role === 'owner' && v.from !== u.id && v.type !== 'thanks';
+  return {
+    id:v.id, type:v.type, categories:v.categories, urgency:v.urgency, status:v.status, createdAt:v.createdAt,
+    summary:v.summary || makeSummary(v), stamp:v.stamp, body:v.body, fact:v.fact, feeling:v.feeling, request:v.request, effect:v.effect,
+    changeNote:v.changeNote, anon:v.anon, emailOk:v.emailOk, publicBoard:v.publicBoard,
+    senderLabel: senderLabel(v,u), storeLabel: storeLabelFor(v,u),
+    recipientsLabel: v.all ? '全員' : v.recipients.map(id => id === u.id ? 'あなた' : nameOf(id)).join('、'),
+    sharedLabel: (v.shared||[]).map(nameOf).join('、'),
+    blockedLabel: v.from === u.id ? (v.blocked||[]).map(nameOf).join('、') : '',
+    unread: !v.readBy.includes(u.id), isMine: v.from === u.id,
+    canManage: canManage(v,u), canReply: visible(v,u), canShare,
+    replyCount: v.thread.filter(t=>t.kind==='reply').length,
+    thread: full ? v.thread.map(threadVm) : [],
+    tips: full && canManage(v,u) ? tipsFor(v) : [],
+    shareCandidates: full && canShare ? DB.staff.filter(s =>
+      s.id !== u.id && !v.recipients.includes(s.id) && !(v.shared||[]).includes(s.id) && !(v.blocked||[]).includes(s.id) &&
+      !(s.id === v.from && revealsSender(v,u))
+    ).map(pubStaff) : []
+  };
+}
+
+/* =========================================================
+   画面の状態
+   ========================================================= */
+const S = {
+  user:null, token:null, view:'login', param:null, data:{}, staff:[], badges:{inbox:0,sent:0},
+  loginStaff:null, pin:'', loginErr:'', compose:null, filter:'open', pulse:[0,0,0], shareSel:[]
+};
+
+async function boot(){
+  try { S.staff = await api('staffList'); } catch(e){ toast(e.message); }
+  render();
+}
+
+async function go(view, param){
+  S.view = view; S.param = param;
+  document.getElementById('app').innerHTML = topbar() + '<main><div class="loading">読み込み中…</div></main>' + nav();
+  try {
+    if (view === 'home') S.data.home = await api('home');
+    if (view === 'inbox') S.data.inbox = await api('inbox');
+    if (view === 'sent') S.data.sent = await api('sent');
+    if (view === 'detail') S.data.voice = await api('voice', { id: param });
+    if (view === 'stats') S.data.stats = await api('stats');
+    if (view === 'settings'){ S.data.staffAdmin = await api('staffAdmin'); S.data.emails = await api('emailLog'); }
+    S.badges = await api('badges');
+  } catch(e){ toast(e.message); }
+  render(); window.scrollTo(0,0);
+}
+
+function render(){
+  const app = document.getElementById('app');
+  if (!S.user){ app.innerHTML = viewLogin(); return; }
+  const views = { home:viewHome, new:viewNew, compose:viewCompose, done:viewDone, inbox:viewInbox, sent:viewSent, detail:viewDetail, stats:viewStats, settings:viewSettings };
+  app.innerHTML = topbar() + '<main>' + (views[S.view] || viewHome)() + '</main>' + nav();
+}
+
+/* =========================================================
+   ログイン（スタッフごとのPIN）
+   ========================================================= */
+function viewLogin(){
+  if (S.loginStaff){
+    const s = S.staff.find(x => x.id === S.loginStaff);
+    const dots = [0,1,2,3].map(i => `<i class="${i < S.pin.length ? 'on' : ''}"></i>`).join('');
+    const keys = ['1','2','3','4','5','6','7','8','9','','0','⌫'].map(k =>
+      k === '' ? '<button class="blank"></button>' : `<button onclick="pinKey('${k}')">${k}</button>`).join('');
+    return `<div class="login">
+      <button class="back" onclick="S.loginStaff=null;S.pin='';S.loginErr='';render()">‹ 名前を選びなおす</button>
+      <div class="logo"><div class="name">${esc(s.name)}さん</div><p>4桁のPINを入力してください</p></div>
+      <div class="pin-dots">${dots}</div>
+      <div class="err">${esc(S.loginErr)}</div>
+      <div class="keypad">${keys}</div>
+    </div>`;
+  }
+  const groups = ['all','oro','plata','mem'].map(st => {
+    const list = S.staff.filter(s => s.store === st);
+    if (!list.length) return '';
+    return `<div class="store-label">${st === 'all' ? 'オーナー' : STORES[st] + ' 店'}</div>
+      <div class="staff-grid">${list.map(s => `<button class="staff-tile" onclick="S.loginStaff='${s.id}';S.pin='';S.loginErr='';render()">${esc(s.name)}<small>${ROLES[s.role]}</small></button>`).join('')}</div>`;
+  }).join('');
+  return `<div class="login">
+    <div class="logo"><div class="mark">🌿</div><div class="name">${esc(CONFIG.SALON_NAME)} <span>Voice</span></div><p>言いにくいことも、ありがとうも。<br>あなたの声がサロンを育てます。</p></div>
+    <p class="small muted" style="margin-bottom:6px">あなたの名前を選んでください</p>
+    ${groups}
+    ${!CONFIG.GAS_URL ? `<div class="demo-hint"><b>デモ用PIN</b><br>オーナー チェスト：0000 ／ 店長 佐藤：1111・鈴木：2222・高橋：3333<br>スタッフ 田中：1234・伊藤：2345・渡辺：3456・山本：4567・中村：5678・小林：6789</div>` : ''}
+  </div>`;
+}
+async function pinKey(k){
+  if (k === '⌫'){ S.pin = S.pin.slice(0,-1); S.loginErr=''; render(); return; }
+  if (S.pin.length >= 4) return;
+  S.pin += k; S.loginErr = ''; render();
+  if (S.pin.length === 4){
+    try {
+      const r = await api('login', { staffId: S.loginStaff, pin: S.pin });
+      S.user = r.user; S.token = r.token; S.loginStaff = null; S.pin = '';
+      go('home');
+    } catch(e){ S.pin = ''; S.loginErr = e.message; render(); }
+  }
+}
+function logout(){ S.user = null; S.token = null; S.view = 'login'; S.data = {}; render(); }
+
+/* =========================================================
+   共通パーツ
+   ========================================================= */
+function topbar(){
+  return `<div class="topbar"><div class="brand">${esc(CONFIG.SALON_NAME)} <span>Voice</span></div>
+    <div class="who">${esc(S.user.name)}さん（${ROLES[S.user.role]}${S.user.store !== 'all' ? '・' + STORES[S.user.store] : ''}）<button onclick="logout()">ログアウト</button></div></div>`;
+}
+function nav(){
+  const items = [
+    ['home','🏠','ホーム'], ['new','✏️','声を送る'],
+    ['inbox','📥','受信箱', S.badges.inbox], ['sent','📤','送った声', S.badges.sent]
+  ];
+  if (S.user.role !== 'staff') items.push(['stats','📊','分析']);
+  if (S.user.role === 'owner') items.push(['settings','⚙️','設定']);
+  const cur = S.view === 'compose' || S.view === 'done' ? 'new' : S.view === 'detail' ? (S.data.voice && S.data.voice.isMine ? 'sent' : 'inbox') : S.view;
+  return `<nav class="nav"><div class="nav-in">${items.map(([v,ic,l,b]) =>
+    `<button class="${cur===v?'on':''}" onclick="go('${v}')"><span class="ic">${ic}</span>${l}${b ? `<span class="badge">${b}</span>` : ''}</button>`).join('')}</div></nav>`;
+}
+const statusPill = st => `<span class="pill st-${st}">${STATUS[st]}</span>`;
+
+/* =========================================================
+   ホーム
+   ========================================================= */
+function viewHome(){
+  const h = S.data.home; if (!h) return '';
+  const hour = new Date().getHours();
+  const greet = hour < 11 ? 'おはようございます' : hour < 18 ? 'おつかれさまです' : 'きょうもおつかれさまでした';
+  const moodBlock = h.mood
+    ? `<div class="row between"><div>今日の気分　<b style="font-size:20px">${moodOf(h.mood).e}</b> ${moodOf(h.mood).l}</div><button class="link" onclick="S.data.home.mood=null;render()">変更</button></div>`
+    : `<div><b>今日の気分は？</b> <span class="small muted">（タップするだけでOK）</span></div>
+       <div class="mood-row">${MOODS.map(m => `<button onclick="setMood('${m.k}')"><span class="e">${m.e}</span>${m.l}</button>`).join('')}</div>
+       <p class="small muted" style="margin-top:8px">気分は個人が特定されない形でだけ集計されます</p>`;
+  return `
+    <h1>${greet}、${esc(S.user.name)}さん 🌿</h1>
+    <p class="lead">小さなことでも大丈夫。ここは安心して話せる場所です。</p>
+    <div class="card" style="margin-top:14px">${moodBlock}</div>
+
+    ${!h.pulseDone ? `<div class="card soft"><div class="row between"><div><b>今月のひとことアンケート</b><div class="small muted">3問だけ・30秒・匿名で集計されます</div></div><button class="btn btn-primary btn-sm" onclick="openPulse()">答える</button></div></div>` : ''}
+    ${h.openCount ? `<div class="card" onclick="S.filter='open';go('inbox')" style="cursor:pointer"><div class="row between"><div>📮 <b>あなたが対応する声：${h.openCount}件</b><div class="small muted">返事の目安は${CONFIG.REPLY_TARGET_DAYS}日以内です</div></div><span class="link">見る ›</span></div></div>` : ''}
+
+    <h2>何を伝えますか？</h2>
+    ${typeGrid()}
+
+    <h2>✓ みんなの声から変わったこと <span class="small muted" style="font-weight:400">今月 ${h.changesThisMonth}件</span></h2>
+    <div class="card">${h.changes.length ? h.changes.map(c => `<div class="change"><span class="ck">✓</span><div>${esc(c.text)}<div class="small muted">${ago(c.at)}</div></div></div>`).join('') : '<div class="small muted">まだありません。最初の声を届けてみませんか？</div>'}</div>
+
+    <h2>💐 ありがとうボード</h2>
+    ${h.board.length ? `<div class="board">${h.board.map(b => `<div class="note"><div class="hd">${esc(b.from)}さん → <b>${esc(b.to)}さん</b>　${ago(b.at)}</div><div style="font-weight:700">${esc(b.stamp)}</div><div>${esc(b.body)}</div></div>`).join('')}</div>` : '<div class="card small muted">まだありません</div>'}
+  `;
+}
+function typeGrid(){
+  return `<div class="type-grid">${Object.entries(TYPES).map(([k,t]) =>
+    `<button class="type-card" onclick="startCompose('${k}')"><span class="e">${t.icon}</span><b>${t.label}</b><span>${t.desc}</span></button>`).join('')}</div>`;
+}
+function viewNew(){
+  return `<h1>声を送る</h1><p class="lead" style="margin-bottom:14px">伝えたいことに近いものを選んでください。</p>${typeGrid()}
+    <div class="notice" style="margin-top:16px">🤝 <b>このアプリの約束</b><br>
+    ・声を送ったことで、不利益な扱いを受けることはありません<br>
+    ・匿名の声について「誰が書いたのか」を探しません<br>
+    ・相談の中で名前を挙げた人には、その声は届きません<br>
+    ・すべての声に、必ず返事をします</div>`;
+}
+async function setMood(k){ await api('setMood', { mood:k }); S.data.home.mood = k; render(); toast('記録しました。今日もよろしくお願いします'); }
+
+/* ---------- 心理的安全性アンケート ---------- */
+function openPulse(){ S.pulse = [0,0,0]; renderPulse(); }
+function renderPulse(){
+  openModal(`<h3>今月のひとことアンケート</h3>
+    <p class="small muted" style="margin-bottom:12px">回答は匿名で集計され、${CONFIG.MIN_N}人以上集まったときだけ表示されます。正解はありません。今の感覚で答えてください。</p>
+    ${PULSE_Q.map((q,i) => `<div class="card" style="padding:12px"><div style="font-weight:700;font-size:14px">Q${i+1}. ${q}</div>
+      <div class="scale">${[1,2,3,4,5].map(n => `<button class="${S.pulse[i]===n?'on':''}" onclick="S.pulse[${i}]=${n};renderPulse()">${n}</button>`).join('')}</div>
+      <div class="scale-l"><span>そう思わない</span><span>とてもそう思う</span></div></div>`).join('')}
+    <div class="actions"><button class="btn" onclick="closeModal()">あとで</button>
+    <button class="btn btn-primary" ${S.pulse.includes(0)?'disabled':''} onclick="submitPulse()">送信する</button></div>`);
+}
+async function submitPulse(){ await api('submitPulse', { answers:S.pulse }); closeModal(); toast('ありがとうございました！'); go('home'); }
+
+/* =========================================================
+   声を送る（入力）
+   ========================================================= */
+function startCompose(type){
+  const owner = S.staff.find(s => s.role === 'owner');
+  const defaultTo = (type !== 'thanks' && owner && owner.id !== S.user.id) ? [owner.id] : [];
+  S.compose = {
+    type, recipients: defaultTo, all:false, blocked:[], anon: type === 'thanks' ? 'named' : 'recipient',
+    categories:[], fact:'', feeling:'', request:'', effect:'', body:'', stamp: type === 'thanks' ? STAMPS[0] : '',
+    urgency:'anytime', emailOk: type !== 'private', publicBoard:true
+  };
+  S.view = 'compose'; render(); window.scrollTo(0,0);
+}
+const C = (k,v) => { S.compose[k] = v; };
+function setC(k,v){ S.compose[k] = v; render(); }
+function toggleC(k,v){
+  const a = S.compose[k], i = a.indexOf(v);
+  i >= 0 ? a.splice(i,1) : a.push(v);
+  if (k === 'blocked' && a.includes(v)) S.compose.recipients = S.compose.recipients.filter(x => x !== v);
+  if (k === 'recipients' && a.includes(v)) S.compose.blocked = S.compose.blocked.filter(x => x !== v);
+  render();
+}
+function insertStarter(field, text){
+  const el = document.getElementById('f-' + field);
+  S.compose[field] = (S.compose[field] ? S.compose[field] : '') + text;
+  if (el){ el.value = S.compose[field]; el.focus(); }
+}
+function staffChipLabel(s){ return `${esc(s.name)}<small>${s.role === 'owner' ? 'オーナー' : STORES[s.store] + (s.role === 'manager' ? ' 店長' : '')}</small>`; }
+
+function recipientPicker(allowAll){
+  const c = S.compose, others = S.staff.filter(s => s.id !== S.user.id);
+  const leaders = others.filter(s => s.role !== 'staff'), members = others.filter(s => s.role === 'staff');
+  const chip = s => `<button class="chip ${c.recipients.includes(s.id) && !c.all ? 'on' : ''}" onclick="${c.all ? '' : `toggleC('recipients','${s.id}')`}" ${c.blocked.includes(s.id) ? 'disabled style="opacity:.35"' : ''}>${staffChipLabel(s)}</button>`;
+  return `<div class="sub-label">オーナー・店長</div><div class="chips">${leaders.map(chip).join('')}</div>
+    <div class="sub-label">スタッフ</div><div class="chips">${members.map(chip).join('')}</div>
+    ${allowAll ? `<label class="check" style="margin-top:10px"><input type="checkbox" ${c.all?'checked':''} onchange="setC('all',this.checked)"><span><b>全員に共有する</b><br><span class="small muted">改善の提案を、みんなで話し合いたいとき</span></span></label>` : ''}`;
+}
+function anonPicker(options){
+  return `<div class="seg">${options.map(k => `<button class="${S.compose.anon===k?'on':''}" onclick="setC('anon','${k}')"><i class="r"></i><div><b>${ANON[k].l}</b><span>${ANON[k].d}</span></div></button>`).join('')}</div>`;
+}
+function step(n, title, sub, inner){
+  return `<div class="step"><div class="step-h"><span class="step-n">STEP ${n}</span><span class="step-t">${title}</span></div>${sub ? `<p class="step-s">${sub}</p>` : ''}${inner}</div>`;
+}
+function textQ(field, label, ph, starters){
+  return `<div class="q"><label>${label}</label>
+    <textarea id="f-${field}" placeholder="${esc(ph)}" oninput="C('${field}',this.value)">${esc(S.compose[field])}</textarea>
+    ${starters ? `<div class="starters">${starters.map(s => `<button onclick="insertStarter('${field}','${s}')">＋ ${s}</button>`).join('')}</div>` : ''}</div>`;
+}
+function feelingPicker(){
+  return `<div class="q"><label>そのとき、どう感じましたか？</label><div class="feel">${FEELINGS.map(f =>
+    `<button class="${S.compose.feeling===f.k?'on':''}" onclick="setC('feeling','${S.compose.feeling===f.k?'':f.k}')"><span class="e">${f.e}</span>${f.l}</button>`).join('')}</div></div>`;
+}
+function urgencyPicker(){
+  return `<div class="chips">${Object.entries(URGENCY).map(([k,l]) => `<button class="chip ${S.compose.urgency===k?'on':''}" onclick="setC('urgency','${k}')">${l}</button>`).join('')}</div>`;
+}
+function categoryPicker(){
+  return `<div class="chips">${CATEGORIES.map(c => `<button class="chip ${S.compose.categories.includes(c)?'on':''}" onclick="toggleC('categories','${c}')">${c}</button>`).join('')}</div>`;
+}
+
+function viewCompose(){
+  const c = S.compose, t = TYPES[c.type];
+  let n = 0, html = `<button class="back" onclick="go('new')">‹ 戻る</button><h1>${t.icon} ${t.label}</h1>`;
+
+  if (c.type === 'thanks'){
+    html += `<p class="lead" style="margin-bottom:12px">「ありがとう」は、言われた人も言った人も元気にします。</p>`;
+    html += step(++n, '誰に届けますか？', '複数選べます', recipientPicker(false));
+    html += step(++n, 'スタンプを選ぶ', '', `<div class="chips">${STAMPS.map(s => `<button class="chip ${c.stamp===s?'on':''}" onclick="setC('stamp','${s}')">${s}</button>`).join('')}</div>`);
+    html += step(++n, 'メッセージ', 'ひとことでも十分うれしいものです',
+      textQ('body', 'どんなことがうれしかったですか？', '例：忙しい時間にフォローに入ってくれて助かりました！', ['〜してくれて助かりました','〜な姿勢を見習いたいです','おかげで〜できました']));
+    html += step(++n, '公開のしかた', '', `${anonPicker(['named','anon'])}
+      <label class="check" style="margin-top:10px"><input type="checkbox" ${c.publicBoard?'checked':''} onchange="C('publicBoard',this.checked)"><span>みんなの「ありがとうボード」にも載せる</span></label>`);
+  }
+
+  if (c.type === 'idea'){
+    html += `<p class="lead" style="margin-bottom:12px">完ぺきな案でなくて大丈夫。「こうなったらいいな」を気軽にどうぞ。</p>`;
+    html += step(++n, 'どんなことについて？', '複数選べます', categoryPicker());
+    html += step(++n, '誰に届けますか？', '複数選べます', recipientPicker(true));
+    html += step(++n, '名前の出し方', '', anonPicker(['named','recipient','anon']));
+    html += step(++n, '内容', 'ヒントを見ながら書けます',
+      textQ('fact', '📝 今はどうなっていますか？', '例：ピーク時にタオルが足りなくなることがあります', ['最近、〜なことがあります']) +
+      textQ('request', '💡 こうしたらどうでしょう？', '例：補充を1日2回に決めるのはどうでしょう', ['〜してみるのはどうでしょう']) +
+      textQ('effect', '✨ 良くなりそうなこと（任意）', '例：お客様をお待たせしなくなりそう'));
+    html += step(++n, '急ぎ度', '', urgencyPicker());
+  }
+
+  if (c.type === 'concern'){
+    html += `<p class="lead" style="margin-bottom:12px">言いにくいことを言葉にしてくれてありがとう。<br>「事実 → 気持ち → お願い」の順に書くと、伝わりやすくなります。</p>`;
+    html += step(++n, 'どんなことですか？', '複数選べます', categoryPicker());
+    html += step(++n, '誰に届けますか？', '複数選べます', recipientPicker(false));
+    html += step(++n, 'この相談に関係する人（任意）', '選んだ人にはこの声は届かず、オーナーが共有することもできません',
+      `<div class="chips">${S.staff.filter(s => s.id !== S.user.id).map(s => `<button class="chip block ${c.blocked.includes(s.id)?'on':''}" onclick="toggleC('blocked','${s.id}')">${staffChipLabel(s)}</button>`).join('')}</div>`);
+    html += step(++n, '名前の出し方', '', anonPicker(['recipient','named','anon']));
+    html += step(++n, '内容', 'ヒントを見ながら書けます',
+      textQ('fact', '📝 どんなことがありましたか？', '例：最近、閉店後の片付けが同じ人に偏っている気がします', ['最近、〜なことがありました','〜のとき、']) +
+      feelingPicker() +
+      textQ('request', '🙏 どうなったらうれしいですか？', '例：当番を決められたら助かります', ['〜してもらえると助かります','一度話す時間がほしいです']));
+    html += step(++n, '急ぎ度', '', urgencyPicker());
+  }
+
+  if (c.type === 'private'){
+    html += `<p class="lead" style="margin-bottom:12px">家庭のこと、体調のこと、将来のこと。仕事に関わる事情は、早めに共有してもらえると一緒に考えられます。</p>`;
+    html += step(++n, '誰に届けますか？', '', recipientPicker(false));
+    html += step(++n, '名前の出し方', 'プライベートの相談は、受け取る人に名前を伝えることをおすすめします', anonPicker(['recipient','named']));
+    html += step(++n, '内容', '話せる範囲で大丈夫です',
+      textQ('fact', '📝 どんなことですか？', '例：来月から土曜の夕方以降のシフトに入りにくくなりそうです') +
+      feelingPicker() +
+      textQ('request', '🙏 どうしてほしいですか？', '例：一度相談の時間をいただけますか', ['一度話す時間がほしいです','まずは知っておいてほしいです']));
+    html += step(++n, '急ぎ度', '', urgencyPicker());
+  }
+
+  if (c.type !== 'thanks'){
+    html += c.type === 'private'
+      ? `<div class="notice">🔒 プライベートの相談は、通知メールに内容を載せません（「相談が届いた」ことだけが通知されます）。</div>`
+      : `<label class="check card" style="padding:12px 14px"><input type="checkbox" ${c.emailOk?'checked':''} onchange="C('emailOk',this.checked)"><span>通知メールに要約を載せてもよい<br><span class="small muted">チェックを外すと「届きました」だけが通知されます</span></span></label>`;
+  }
+
+  html += `<div class="actions" style="margin-top:14px">
+    ${c.type !== 'thanks' ? `<button class="btn" onclick="soften()">✨ やさしい表現にする</button>` : ''}
+    <button class="btn btn-primary" onclick="sendVoice()">送信する</button></div>`;
+  return html;
+}
+
+async function soften(){
+  const c = S.compose;
+  if (!c.fact && !c.request){ toast('先に内容を書いてください'); return; }
+  const r = await api('soften', { fact:c.fact, request:c.request });
+  S._soft = r;
+  openModal(`<h3>✨ やさしい表現の提案</h3>
+    <p class="small muted" style="margin-bottom:10px">相手を責める言い方にならないよう、言い換えた案です。そのまま送っても大丈夫です。</p>
+    <div class="cmp"><div class="small muted">いまの文章</div><div class="b">${esc(c.fact)}${c.request ? '\n\n' + esc(c.request) : ''}</div>
+    <div class="small muted">提案</div><div class="b after">${esc(r.fact)}${r.request ? '\n\n' + esc(r.request) : ''}</div></div>
+    ${!CONFIG.GAS_URL ? '<p class="small muted" style="margin-top:8px">※デモでは簡単な言い換えだけです。本番ではAI（Claude）が文章全体を整えます。</p>' : ''}
+    <div class="actions" style="margin-top:12px"><button class="btn" onclick="closeModal()">このままにする</button><button class="btn btn-primary" onclick="applySoft()">この表現にする</button></div>`);
+}
+function applySoft(){ S.compose.fact = S._soft.fact; S.compose.request = S._soft.request; closeModal(); render(); toast('表現を変更しました'); }
+
+async function sendVoice(){
+  const c = S.compose;
+  if (!c.all && !c.recipients.length) return toast('宛先を選んでください');
+  if (c.type === 'thanks' && !c.body.trim()) return toast('メッセージを書いてください');
+  if (c.type !== 'thanks' && !c.fact.trim() && !c.request.trim()) return toast('内容を書いてください');
+  try {
+    await api('sendVoice', c);
+    S.badges = await api('badges');
+    S.view = 'done'; render(); window.scrollTo(0,0);
+  } catch(e){ toast(e.message); }
+}
+function viewDone(){
+  const thanks = S.compose && S.compose.type === 'thanks';
+  return `<div style="text-align:center;padding:40px 8px">
+    <div style="font-size:52px">${thanks ? '💐' : '🕊'}</div>
+    <h1 style="margin:10px 0">届けました</h1>
+    <p>${thanks ? 'あなたの「ありがとう」は、きっと相手の力になります。' : '伝えてくれてありがとう。<br>あなたの声は、サロンをよくする大事なヒントです。'}</p>
+    ${!thanks ? `<p class="small muted" style="margin-top:12px">返事が届いたら「送った声」でお知らせします。<br>（目安：${CONFIG.REPLY_TARGET_DAYS}日以内）</p>` : ''}
+    <div class="actions" style="margin-top:24px;max-width:340px;margin-left:auto;margin-right:auto">
+      <button class="btn" onclick="go('sent')">送った声を見る</button><button class="btn btn-primary" onclick="go('home')">ホームへ</button></div></div>`;
+}
+
+/* =========================================================
+   受信箱・送った声
+   ========================================================= */
+function voiceItem(v, mine){
+  const t = TYPES[v.type];
+  const steps = ['new','read','reviewing','done'], idx = steps.indexOf(v.status);
+  return `<button class="item" onclick="go('detail','${v.id}')">
+    <div class="item-ic">${t.icon}</div>
+    <div class="item-main">
+      <div class="item-top">${t.label} ${v.categories.map(c => `<span class="tag">${esc(c)}</span>`).join('')}</div>
+      <div class="item-sum">${esc(v.type === 'thanks' ? v.stamp + ' ' + v.body : (v.fact || v.request))}</div>
+      <div class="item-meta">${mine ? '宛先：' + esc(v.recipientsLabel) : 'from ' + esc(v.senderLabel)}・${ago(v.createdAt)}${v.replyCount ? '・💬' + v.replyCount : ''}</div>
+      ${mine && v.type !== 'thanks' ? `<div class="progress">${steps.map((s,i) => `<i class="${i<=idx?'on':''}"></i>`).join('')}</div><div class="progress-l"><span>送信</span><span>受け取り</span><span>検討中</span><span>対応</span></div>` : ''}
+    </div>
+    <div class="item-side">${v.type !== 'thanks' ? statusPill(v.status) : ''}${v.unread ? '<span class="dot"></span>' : ''}</div>
+  </button>`;
+}
+function viewInbox(){
+  const all = S.data.inbox || [];
+  const f = S.filter;
+  const list = all.filter(v => f === 'all' ? true : f === 'open' ? (v.type !== 'thanks' && v.status !== 'done') : f === 'thanks' ? v.type === 'thanks' : v.status === 'done' && v.type !== 'thanks');
+  const tab = (k,l) => `<button class="${f===k?'on':''}" onclick="S.filter='${k}';render()">${l}</button>`;
+  return `<h1>受信箱</h1>
+    <div class="tabs">${tab('open','未対応')}${tab('thanks','ありがとう')}${tab('done','対応済み')}${tab('all','すべて')}</div>
+    ${list.length ? list.map(v => voiceItem(v,false)).join('') : '<div class="empty">ここには、まだ声がありません</div>'}`;
+}
+function viewSent(){
+  const list = S.data.sent || [];
+  return `<h1>送った声</h1><p class="lead" style="margin-bottom:12px">あなたの声が今どうなっているか、ここで確認できます。</p>
+    ${list.length ? list.map(v => voiceItem(v,true)).join('') : '<div class="empty">まだ送った声はありません</div>'}`;
+}
+
+/* =========================================================
+   詳細
+   ========================================================= */
+function viewDetail(){
+  const v = S.data.voice; if (!v) return '';
+  const t = TYPES[v.type];
+  const meta = [];
+  if (v.categories.length) meta.push(['分類', v.categories.join(' ／ ')]);
+  meta.push(['送った人', v.senderLabel]);
+  meta.push(['店舗', v.storeLabel]);
+  meta.push(['宛先', v.recipientsLabel]);
+  if (v.sharedLabel) meta.push(['共有', v.sharedLabel + 'さん']);
+  if (v.blockedLabel) meta.push(['届かない人', v.blockedLabel + 'さん']);
+  if (v.feeling) meta.push(['気持ち', feelingOf(v.feeling).e + ' ' + feelingOf(v.feeling).l]);
+  if (v.type !== 'thanks') meta.push(['急ぎ度', URGENCY[v.urgency]]);
+  meta.push(['送信日時', new Date(v.createdAt).toLocaleString('ja-JP',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'})]);
+  if (v.isMine) meta.push(['名前の出し方', ANON[v.anon].l]);
+
+  let body = '';
+  if (v.type === 'thanks') body = `<div class="body-sec"><p style="font-weight:700">${esc(v.stamp)}</p><p>${esc(v.body)}</p></div>`;
+  else {
+    const L = v.type === 'idea' ? ['📝 今の状態','💡 提案','✨ 良くなりそうなこと'] : ['📝 あったこと','🙏 お願い',''];
+    if (v.fact) body += `<div class="body-sec"><div class="h">${L[0]}</div><p>${esc(v.fact)}</p></div>`;
+    if (v.request) body += `<div class="body-sec"><div class="h">${L[1]}</div><p>${esc(v.request)}</p></div>`;
+    if (v.effect) body += `<div class="body-sec"><div class="h">${L[2]}</div><p>${esc(v.effect)}</p></div>`;
+  }
+
+  const thread = v.thread.map(m => m.kind === 'sys'
+    ? `<div class="sys">${esc(m.text)}・${ago(m.at)}</div>`
+    : `<div class="msg ${m.mine?'mine':''}"><span class="who">${esc(m.who)}・${ago(m.at)}</span><div class="bub">${esc(m.text)}</div></div>`).join('');
+
+  return `<button class="back" onclick="go('${v.isMine ? 'sent' : 'inbox'}')">‹ 一覧へ</button>
+    <div class="row between" style="margin-bottom:10px"><h1 style="margin:0">${t.icon} ${t.label}</h1>${v.type !== 'thanks' ? statusPill(v.status) : ''}</div>
+
+    ${!v.isMine ? `<div class="ai"><div class="h">AI 要約</div>${esc(v.summary)}</div>` : ''}
+
+    <div class="card"><dl class="meta">${meta.map(([a,b]) => `<dt>${a}</dt><dd>${esc(b)}</dd>`).join('')}</dl>${body}</div>
+
+    ${v.tips.length ? `<div class="card green"><div style="font-weight:700;font-size:13px;margin-bottom:4px">💡 対応のヒント</div>${v.tips.map(x => `<div class="small">・${esc(x)}</div>`).join('')}</div>` : ''}
+
+    ${v.canManage && v.type !== 'thanks' ? `<div class="card"><div style="font-weight:700;font-size:13.5px;margin-bottom:8px">状況を更新する <span class="small muted" style="font-weight:400">（送った人に表示されます）</span></div>
+      <div class="status-btns">${['read','reviewing','done'].map(s => `<button class="${v.status===s?'on':''}" onclick="${s==='done' ? 'openDone()' : `setStatus('${s}')`}">${STATUS[s]}</button>`).join('')}</div>
+      ${v.changeNote ? `<div class="notice">✓ ${esc(v.changeNote)}</div>` : ''}</div>` : ''}
+
+    ${v.canShare ? `<button class="btn btn-block" style="margin-bottom:12px" onclick="openShare()">👥 ほかの人にも聞いてもらう</button>` : ''}
+
+    <h2>💬 やりとり</h2>
+    <div class="thread">${thread || '<div class="small muted">まだやりとりはありません</div>'}</div>
+    ${v.canReply ? `<div class="card" style="margin-top:10px">
+      ${v.canManage && !v.replyCount ? `<div class="starters" style="margin:0 0 8px">${['伝えてくれてありがとう。','受け取りました。少し考えさせてください。','一度話す時間をとりましょう。'].map(s => `<button onclick="document.getElementById('reply').value+='${s}'">＋ ${s}</button>`).join('')}</div>` : ''}
+      <textarea id="reply" placeholder="${v.isMine ? '追加で伝えたいことがあればどうぞ' : '返事を書く（送った人に届きます）'}"></textarea>
+      <button class="btn btn-primary btn-block" style="margin-top:8px" onclick="sendReply()">送信</button></div>` : ''}
+  `;
+}
+async function setStatus(status, changeNote){
+  try { S.data.voice = await api('setStatus', { id:S.data.voice.id, status, changeNote }); S.badges = await api('badges'); closeModal(); render(); toast('「' + STATUS[status] + '」にしました'); }
+  catch(e){ toast(e.message); }
+}
+function openDone(){
+  openModal(`<h3>✓ 対応しました</h3>
+    <p class="small muted" style="margin-bottom:10px">変わったことを書くと、ホームの「みんなの声から変わったこと」に載ります（送った人の名前は出ません）。<br>「言えば変わる」という実感が、次の声につながります。</p>
+    <textarea id="changeNote" placeholder="例：plata：閉店後の片付けを当番制にしました"></textarea>
+    <div class="actions" style="margin-top:12px"><button class="btn" onclick="closeModal()">キャンセル</button><button class="btn btn-primary" onclick="setStatus('done',document.getElementById('changeNote').value.trim())">対応済みにする</button></div>`);
+}
+async function sendReply(){
+  const el = document.getElementById('reply'), text = el.value.trim();
+  if (!text) return toast('返事を書いてください');
+  try { S.data.voice = await api('reply', { id:S.data.voice.id, text }); render(); toast('送信しました'); }
+  catch(e){ toast(e.message); }
+}
+
+/* ---------- オーナーの共有 ---------- */
+function openShare(){ S.shareSel = []; renderShare(); }
+function renderShare(){
+  const v = S.data.voice;
+  const c = v.shareCandidates;
+  const leaders = c.filter(s => s.role !== 'staff'), members = c.filter(s => s.role === 'staff');
+  const chip = s => `<button class="chip ${S.shareSel.includes(s.id)?'on':''}" onclick="toggleShare('${s.id}')">${staffChipLabel(s)}</button>`;
+  const note = (document.getElementById('shareNote') || {}).value || '';
+  openModal(`<h3>👥 ほかの人にも聞いてもらう</h3>
+    <p class="small muted" style="margin-bottom:10px">選んだ人がこの声を読み、返事ができるようになります。共有したことは送った人にも表示されます。</p>
+    ${v.type === 'private' ? `<div class="notice" style="background:var(--red-soft);color:var(--red);margin:0 0 10px">🔒 プライベートの相談です。共有する前に、本人の了承をとりましょう。</div>` : ''}
+    ${v.anon !== 'named' ? `<div class="notice" style="margin:0 0 10px">共有された人には、送った人の名前は表示されません（匿名のままです）。</div>` : ''}
+    ${leaders.length ? `<div class="sub-label">オーナー・店長</div><div class="chips">${leaders.map(chip).join('')}</div>` : ''}
+    ${members.length ? `<div class="sub-label">スタッフ</div><div class="chips">${members.map(chip).join('')}</div>` : ''}
+    ${!c.length ? '<div class="small muted">共有できる人がいません</div>' : ''}
+    <div class="q" style="margin-top:12px"><label>ひとこと（任意）</label><textarea id="shareNote" placeholder="例：plataの片付けの件、一緒に考えてほしいです">${esc(note)}</textarea></div>
+    <div class="actions" style="margin-top:12px"><button class="btn" onclick="closeModal()">キャンセル</button>
+    <button class="btn btn-primary" ${S.shareSel.length?'':'disabled'} onclick="doShare()">共有する（${S.shareSel.length}人）</button></div>`);
+}
+function toggleShare(id){ const i = S.shareSel.indexOf(id); i >= 0 ? S.shareSel.splice(i,1) : S.shareSel.push(id); renderShare(); }
+async function doShare(){
+  try {
+    S.data.voice = await api('share', { id:S.data.voice.id, ids:S.shareSel, note:document.getElementById('shareNote').value.trim() });
+    closeModal(); render(); toast('共有しました。メールでもお知らせしています');
+  } catch(e){ toast(e.message); }
+}
+
+/* =========================================================
+   分析（オーナー：全店 / 店長：自店）
+   ========================================================= */
+function viewStats(){
+  const s = S.data.stats; if (!s) return '';
+  const p = s.pulse, MIN = CONFIG.MIN_N;
+  const fmt = (x,d=1) => x == null ? '—' : x.toFixed(d);
+  const diff = p.score != null && p.prev != null ? p.score - p.prev : null;
+  const sup = n => `<div class="suppress">回答が${n}人のため非表示（${MIN}人以上で表示されます）</div>`;
+  const totalV = Object.values(s.counts).reduce((a,b)=>a+b,0) || 1;
+  const maxCat = s.cats.length ? s.cats[0][1] : 1;
+  return `<h1>📊 サロンの状態</h1><p class="lead">${s.scope}・個人が特定されないよう、${MIN}人未満の集計は表示しません</p>
+
+    <h2>心理的安全性スコア <span class="small muted" style="font-weight:400">今月</span></h2>
+    <div class="card">
+      ${p.score != null ? `<div class="row" style="align-items:baseline;gap:10px"><span style="font-size:34px;font-weight:800">${fmt(p.score)}</span><span class="muted">/ 5.0</span>
+        ${diff != null ? `<span class="${diff>=0?'up':'down'}">${diff>=0?'↑':'↓'} 先月より${diff>=0?'+':''}${fmt(diff)}</span>` : ''}</div>
+        <div class="small muted">回答 ${p.n}人</div>
+        ${p.items.map(it => `<div class="barrow"><div class="lb"><span>${esc(it.q)}</span><b>${fmt(it.v)}</b></div><div class="bar"><i style="width:${(it.v||0)/5*100}%;background:var(--accent)"></i></div></div>`).join('')}
+        ${p.byStore.length > 1 ? `<div class="sub-label" style="margin-top:14px">店舗別</div>${p.byStore.map(b => `<div class="barrow"><div class="lb"><span>${STORES[b.store]}</span><b>${b.v != null ? fmt(b.v) : ''}</b></div>${b.v != null ? `<div class="bar"><i style="width:${b.v/5*100}%;background:var(--green)"></i></div>` : sup(b.n)}</div>`).join('')}` : ''}`
+      : sup(p.n)}
+      <p class="small muted" style="margin-top:10px">ハーバード大学のエドモンドソン教授の研究にもとづく考え方です。毎月同じ3つの質問で、変化を追いかけます。</p>
+    </div>
+
+    <h2>今週の気分</h2>
+    <div class="card">
+      ${s.moodBy.map(m => `<div class="barrow"><div class="lb"><span>${STORES[m.store]}</span><span class="muted small">${m.n}人</span></div>
+        ${m.dist ? `<div class="bar">${MOODS.map(k => `<i style="width:${m.dist[k.k]}%;background:${k.c}"></i>`).join('')}</div>` : sup(m.n)}</div>`).join('')}
+      <div class="legend">${MOODS.map(k => `<span><i style="background:${k.c}"></i>${k.e} ${k.l}</span>`).join('')}</div>
+    </div>
+
+    <div class="kpi">
+      <div class="card"><div class="l">返事までの平均</div><div class="v">${fmt(s.avgDays)}<small> 日</small></div><div class="small ${s.avgDays!=null && s.avgDays<=CONFIG.REPLY_TARGET_DAYS?'up':'down'}">目標 ${CONFIG.REPLY_TARGET_DAYS}日以内${s.avgDays!=null && s.avgDays<=CONFIG.REPLY_TARGET_DAYS?' ✓':''}</div></div>
+      <div class="card"><div class="l">返事をした割合</div><div class="v">${fmt(s.responseRate,0)}<small> %</small></div><div class="small muted">${s.handled}件中</div></div>
+    </div>
+
+    <h2>今月届いた声</h2>
+    <div class="card">
+      <div class="bar" style="height:14px">${Object.entries(s.counts).map(([k,n],i) => `<i style="width:${n/totalV*100}%;background:${['#e7b98a','#f0c46a','#9fb5cf','#b6a6c9'][i]}"></i>`).join('')}</div>
+      <div class="legend">${Object.entries(s.counts).map(([k,n],i) => `<span><i style="background:${['#e7b98a','#f0c46a','#9fb5cf','#b6a6c9'][i]}"></i>${TYPES[k].icon} ${TYPES[k].label} ${n}</span>`).join('')}</div>
+      <p class="small muted" style="margin-top:8px">「ありがとう」が「モヤモヤ」の5倍くらいあると、関係が良好な目安です（ゴットマンの研究より）。</p>
+    </div>
+
+    <h2>よく出てくるテーマ <span class="small muted" style="font-weight:400">提案・相談</span></h2>
+    <div class="card">${s.cats.length ? s.cats.map(([c,n]) => `<div class="barrow"><div class="lb"><span>${esc(c)}</span><b>${n}</b></div><div class="bar"><i style="width:${n/maxCat*100}%;background:var(--blue)"></i></div></div>`).join('') : '<div class="small muted">まだデータがありません</div>'}</div>
+  `;
+}
+
+/* =========================================================
+   設定（オーナーのみ）
+   ========================================================= */
+function viewSettings(){
+  const staff = S.data.staffAdmin || [], mails = S.data.emails || [];
+  return `<h1>⚙️ 設定</h1>
+    <h2>スタッフとPIN</h2>
+    <div class="card"><table class="tbl">${staff.map(s => `<tr><td><b>${esc(s.name)}</b><div class="small muted">${ROLES[s.role]}・${STORES[s.store]}</div></td>
+      <td class="small muted">PIN ${esc(s.pin)}<br>${esc(s.email || 'メールなし')}</td>
+      <td style="text-align:right"><button class="btn btn-sm" onclick="editStaff('${s.id}')">編集</button></td></tr>`).join('')}</table>
+      <button class="btn btn-block" style="margin-top:10px" onclick="editStaff('')">＋ スタッフを追加</button>
+      <p class="small muted" style="margin-top:8px">メールアドレスを入れた人には、声が届いたときに通知メールが送られます。</p></div>
+
+    <h2>📧 送信された通知メール ${!CONFIG.GAS_URL ? '<span class="small muted" style="font-weight:400">デモ</span>' : ''}</h2>
+    ${mails.length ? mails.map((m,i) => `<button class="item" onclick="showMail(${i})"><div class="item-ic">✉️</div><div class="item-main"><div class="item-top">${esc(m.subject)}</div><div class="item-meta">to ${esc(m.to)}・${ago(m.at)}</div></div></button>`).join('')
+      : '<div class="card small muted">まだありません。ほかのスタッフでログインして声を送ると、ここにメールの内容が表示されます。</div>'}
+
+    <h2>接続</h2>
+    <div class="card small">${CONFIG.GAS_URL ? '✅ GASに接続中' : '⚠️ デモモードです（データは再読み込みで消えます）。HTML内の <code>CONFIG.GAS_URL</code> を設定すると本番になります。'}</div>`;
+}
+function showMail(i){
+  const m = S.data.emails[i];
+  openModal(`<h3>通知メール</h3><div class="small muted" style="margin-bottom:8px">to ${esc(m.to)}</div>
+    <div class="mail"><b>件名：${esc(m.subject)}</b>\n\n${esc(m.body)}</div>
+    <button class="btn btn-block" style="margin-top:12px" onclick="closeModal()">閉じる</button>`);
+}
+function editStaff(id){
+  const s = id ? S.data.staffAdmin.find(x => x.id === id) : { id:'', name:'', role:'staff', store:'oro', pin:'', email:'' };
+  openModal(`<h3>${id ? 'スタッフを編集' : 'スタッフを追加'}</h3>
+    <div class="q"><label>名前</label><input type="text" id="e-name" value="${esc(s.name)}"></div>
+    <div class="q"><label>役割</label><select id="e-role">${Object.entries(ROLES).map(([k,l]) => `<option value="${k}" ${s.role===k?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="q"><label>店舗</label><select id="e-store">${Object.entries(STORES).map(([k,l]) => `<option value="${k}" ${s.store===k?'selected':''}>${l}</option>`).join('')}</select></div>
+    <div class="q"><label>PIN（4桁の数字）</label><input type="tel" id="e-pin" maxlength="4" inputmode="numeric" value="${esc(s.pin)}"></div>
+    <div class="q"><label>通知用メール（任意）</label><input type="email" id="e-email" value="${esc(s.email)}"></div>
+    <div class="actions" style="margin-top:14px"><button class="btn" onclick="closeModal()">キャンセル</button><button class="btn btn-primary" onclick="saveStaff('${s.id}')">保存</button></div>`);
+}
+async function saveStaff(id){
+  const g = k => document.getElementById('e-' + k).value.trim();
+  const s = { id, name:g('name'), role:g('role'), store:g('store'), pin:g('pin'), email:g('email') };
+  if (!s.name) return toast('名前を入れてください');
+  try { await api('saveStaff', s); S.staff = await api('staffList'); closeModal(); go('settings'); toast('保存しました'); }
+  catch(e){ toast(e.message); }
+}
+
+boot();
+</script>
+</body>
+</html>
